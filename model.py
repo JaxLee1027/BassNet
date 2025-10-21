@@ -24,9 +24,9 @@ class UNet(nn.Module):
         self.in_channels = in_channels
         self.out_channels = out_channels
 
-        # 编码器 (下采样路径)
+        # encoder(downsampling path)
         self.down1 = DoubleConv(in_channels, 64)
-        self.pool1 = nn.MaxPool2d(2) # 尺寸减半
+        self.pool1 = nn.MaxPool2d(2) # half the size
         self.down2 = DoubleConv(64, 128)
         self.pool2 = nn.MaxPool2d(2)
         self.down3 = DoubleConv(128, 256)
@@ -34,10 +34,10 @@ class UNet(nn.Module):
         self.down4 = DoubleConv(256, 512)
         self.pool4 = nn.MaxPool2d(2)
 
-        # 瓶颈层 (U形的底部)
+        # bottleneck(bottom layer)
         self.bottleneck = DoubleConv(512, 1024)
 
-        # 解码器 (上采样路径)
+        # decoder(upsampling path)
         self.up1 = nn.ConvTranspose2d(1024, 512, kernel_size=2, stride=2)
         self.up_conv1 = DoubleConv(1024, 512) # 512(from up1) + 512(from skip) = 1024
         
@@ -50,12 +50,18 @@ class UNet(nn.Module):
         self.up4 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
         self.up_conv4 = DoubleConv(128, 64) # 64 + 64 = 128
 
-        # 最终输出层
-        self.out_conv = nn.Conv2d(64, out_channels, kernel_size=1)
+        # final output layer
+        # self.out_conv = nn.Conv2d(64, out_channels, kernel_size=1)
+        # extend from H=342 to H=863
+        self.extrapolation_block = nn.Sequential(
+            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=(2, 1), padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, out_channels, kernel_size=1)
+        )
 
     def forward(self, x):
-        # 编码
-        # 保存每一层池化前的输出，用于跳跃连接
+        # encoder
+        # save the output before each pooling layer for skip connections
         skip1 = self.down1(x)
         d1 = self.pool1(skip1)
         
@@ -68,16 +74,15 @@ class UNet(nn.Module):
         skip4 = self.down4(d3)
         d4 = self.pool4(skip4)
         
-        # 瓶颈
+        # bottleneck
         b = self.bottleneck(d4)
         
-        # 解码 + 跳跃连接
+        # decoder + skip connections
         u1 = self.up1(b)
-        # 如果上采样后尺寸和跳跃连接的特征图有1个像素的差异，需要进行裁剪或填充
-        # 这里使用 F.interpolate 是更现代、更稳妥的做法
+        # if upsampled size differs by 1 pixel from skip connection, we need to crop or pad
         if u1.shape != skip4.shape:
             u1 = F.interpolate(u1, size=skip4.shape[2:], mode='bilinear', align_corners=True)
-        cat1 = torch.cat([skip4, u1], dim=1) # 在通道维度上拼接
+        cat1 = torch.cat([skip4, u1], dim=1) # oncatenate at the channel dimension
         uc1 = self.up_conv1(cat1)
 
         u2 = self.up2(uc1)
@@ -98,5 +103,5 @@ class UNet(nn.Module):
         cat4 = torch.cat([skip1, u4], dim=1)
         uc4 = self.up_conv4(cat4)
         
-        return self.out_conv(uc4)
+        return self.extrapolation_block(uc4)
 

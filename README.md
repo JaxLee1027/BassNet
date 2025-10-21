@@ -25,6 +25,6 @@ Epoch: 25
 Learning rate: 1e-4
 
 ### Result
-![alt text](sample_0_comparison.png)
+![alt text](evaluation_outputs/sample_0_comparison.png)
 
 The Average MSE on test dataset is 24.5, which means on average, our model's prediction at any (time, frequency) point will deviate from the true value by ~5 dB. This is a good start as using RIR alone to train the model.

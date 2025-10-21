@@ -18,6 +18,19 @@ OUTPUT_DIR = "evaluation_outputs"
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+SAMPLE_RATE = 48000
+N_FFT = 2048
+HOP_LENGTH = 512
+SPLIT_FREQ_HZ = 16000
+
+# Pre-calculate y-axis frequency bins for plotting
+print("Calculating frequency bins...")
+FREQS = librosa.fft_frequencies(sr=SAMPLE_RATE, n_fft=N_FFT)
+SPLIT_INDEX = np.argmin(np.abs(FREQS - SPLIT_FREQ_HZ))
+LOW_FREQ_COORDS = FREQS[:SPLIT_INDEX] # 0-16kHz
+print(f"Plotting with {len(LOW_FREQ_COORDS)} frequency bins up to ~{FREQS[SPLIT_INDEX]:.0f} Hz")
+
+
 all_indices = list(range(47484))
 train_split = int(0.8 * len(all_indices))
 val_split = int(0.9 * len(all_indices))
@@ -57,6 +70,7 @@ print("Generating visual comparison plots...")
 with torch.no_grad():
     for i in range(5):
         high_freq, low_freq_truth = test_dataset[i]
+        print(f"Loading Test Sample {i}: Ground Truth .npy shape is: {low_freq_truth.shape}")
         high_freq_input = high_freq.unsqueeze(0).to(DEVICE)
         low_freq_pred = model(high_freq_input)
         if low_freq_pred.shape != low_freq_truth.unsqueeze(0).shape:
@@ -67,17 +81,17 @@ with torch.no_grad():
         fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 12))
         fig.suptitle(f'Sample {i} Spectrogram Comparison', fontsize=16)
 
-        librosa.display.specshow(truth_np, ax=ax1, y_axis='linear', x_axis='time')
+        librosa.display.specshow(truth_np, ax=ax1, y_coords=LOW_FREQ_COORDS, y_axis='hz', x_axis='time', sr=SAMPLE_RATE, hop_length=HOP_LENGTH)
         ax1.set_title('Ground Truth Low-Frequency Spectrogram')
-        ax1.set_ylim(0, 16000)
+        # ax1.set_ylim(0, 16000)
 
-        librosa.display.specshow(pred_np, ax=ax2, y_axis='linear', x_axis='time')
+        librosa.display.specshow(pred_np, ax=ax2, y_coords=LOW_FREQ_COORDS, y_axis='hz', x_axis='time', sr=SAMPLE_RATE, hop_length=HOP_LENGTH)
         ax2.set_title('Predicted Low-Frequency Spectrogram')
-        ax2.set_ylim(0, 16000)
+        # ax2.set_ylim(0, 16000)
 
         error_map = np.abs(truth_np - pred_np)
-        img = librosa.display.specshow(error_map, ax=ax3, y_axis='linear', x_axis='time')
-        ax3.set_ylim(0, 16000)
+        img = librosa.display.specshow(error_map, ax=ax3, y_coords=LOW_FREQ_COORDS, y_axis='hz', x_axis='time', sr=SAMPLE_RATE, hop_length=HOP_LENGTH)
+        # ax3.set_ylim(0, 16000)
         fig.colorbar(img, ax=ax3, format="%+2.0f dB")
 
         plt.tight_layout()
