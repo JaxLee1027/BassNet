@@ -2,106 +2,92 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class DoubleConv(nn.Module):
-    """(Convolution => [BN] => ReLU) * 2"""
-    def __init__(self, in_channels, out_channels):
+# --- Reusable 1D Convolutional Block ---
+class Downsample1DBlock(nn.Module):
+    """
+    A 1D convolutional block used in the U-Net encoder.
+    It consists of Conv1D -> BatchNorm1D -> LeakyReLU.
+    """
+    def __init__(self, in_channels, out_channels, kernel_size, stride):
         super().__init__()
-        self.double_conv = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True)
-        )
+        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size, stride, padding=(kernel_size - stride) // 2)
+        self.bn = nn.BatchNorm1d(out_channels)
+        self.lrelu = nn.LeakyReLU(0.2)
 
     def forward(self, x):
-        return self.double_conv(x)
+        return self.lrelu(self.bn(self.conv(x)))
 
-class UNet(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(UNet, self).__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-
-        # encoder(downsampling path)
-        self.down1 = DoubleConv(in_channels, 64)
-        self.pool1 = nn.MaxPool2d(2) # half the size
-        self.down2 = DoubleConv(64, 128)
-        self.pool2 = nn.MaxPool2d(2)
-        self.down3 = DoubleConv(128, 256)
-        self.pool3 = nn.MaxPool2d(2)
-        self.down4 = DoubleConv(256, 512)
-        self.pool4 = nn.MaxPool2d(2)
-
-        # bottleneck(bottom layer)
-        self.bottleneck = DoubleConv(512, 1024)
-
-        # decoder(upsampling path)
-        self.up1 = nn.ConvTranspose2d(1024, 512, kernel_size=2, stride=2)
-        self.up_conv1 = DoubleConv(1024, 512) # 512(from up1) + 512(from skip) = 1024
-        
-        self.up2 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
-        self.up_conv2 = DoubleConv(512, 256) # 256 + 256 = 512
-        
-        self.up3 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
-        self.up_conv3 = DoubleConv(256, 128) # 128 + 128 = 256
-        
-        self.up4 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
-        self.up_conv4 = DoubleConv(128, 64) # 64 + 64 = 128
-
-        # final output layer
-        # self.out_conv = nn.Conv2d(64, out_channels, kernel_size=1)
-        # extend from H=342 to H=863
-        self.extrapolation_block = nn.Sequential(
-            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=(2, 1), padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(32, out_channels, kernel_size=1)
-        )
+class Upsample1DBlock(nn.Module):
+    """
+    A 1D transposed convolutional block used in the U-Net decoder.
+    It consists of ConvTranspose1D -> BatchNorm1D -> ReLU.
+    """
+    def __init__(self, in_channels, out_channels, kernel_size, stride):
+        super().__init__()
+        self.tconv = nn.ConvTranspose1d(in_channels, out_channels, kernel_size, stride, padding=(kernel_size - stride) // 2, output_padding=stride - 1)
+        self.bn = nn.BatchNorm1d(out_channels)
+        self.lrelu = nn.LeakyReLU(0.2)
 
     def forward(self, x):
-        # encoder
-        # save the output before each pooling layer for skip connections
-        skip1 = self.down1(x)
-        d1 = self.pool1(skip1)
-        
-        skip2 = self.down2(d1)
-        d2 = self.pool2(skip2)
-        
-        skip3 = self.down3(d2)
-        d3 = self.pool3(skip3)
-        
-        skip4 = self.down4(d3)
-        d4 = self.pool4(skip4)
-        
-        # bottleneck
-        b = self.bottleneck(d4)
-        
-        # decoder + skip connections
-        u1 = self.up1(b)
-        # if upsampled size differs by 1 pixel from skip connection, we need to crop or pad
-        if u1.shape != skip4.shape:
-            u1 = F.interpolate(u1, size=skip4.shape[2:], mode='bilinear', align_corners=True)
-        cat1 = torch.cat([skip4, u1], dim=1) # oncatenate at the channel dimension
-        uc1 = self.up_conv1(cat1)
+        return self.lrelu(self.bn(self.tconv(x)))
 
-        u2 = self.up2(uc1)
-        if u2.shape != skip3.shape:
-            u2 = F.interpolate(u2, size=skip3.shape[2:], mode='bilinear', align_corners=True)
-        cat2 = torch.cat([skip3, u2], dim=1)
-        uc2 = self.up_conv2(cat2)
-        
-        u3 = self.up3(uc2)
-        if u3.shape != skip2.shape:
-            u3 = F.interpolate(u3, size=skip2.shape[2:], mode='bilinear', align_corners=True)
-        cat3 = torch.cat([skip2, u3], dim=1)
-        uc3 = self.up_conv3(cat3)
+# --- The Auxiliary 2D Spectrogram Encoder ---
+class SpecEncoder2D(nn.Module):
+    """
+    Encodes the 2D spectrogram input into a 1D feature vector that can be fused with the 1D U-Net bottleneck.
 
-        u4 = self.up4(uc3)
-        if u4.shape != skip1.shape:
-            u4 = F.interpolate(u4, size=skip1.shape[2:], mode='bilinear', align_corners=True)
-        cat4 = torch.cat([skip1, u4], dim=1)
-        uc4 = self.up_conv4(cat4)
-        
-        return self.extrapolation_block(uc4)
+    Input: (B, 1, 1025, 38)
+    Output: (B, feature_channels, 3)
+    """
+    def __init__(self, out_time_dim=3, out_channels=512):
+        super().__init__()
+        self.out_time_dim = out_time_dim
 
+        # A simple 2D CNN stack
+        # Input: (B, 1, 1025, 38)
+        self.conv_stack = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=3, stride=(2, 2), padding=1),  # (B, 32, 513, 19)
+            nn.BatchNorm2d(32),
+            nn.LeakyReLU(0.2),
+
+            nn.Conv2d(32, 64, kernel_size=3, stride=(2, 2), padding=1),  # (B, 64, 257, 10)
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.2),
+
+            nn.Conv2d(64, 128, kernel_size=3, stride=(2, 2), padding=1),  # (B, 128, 129, 5)
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.2),
+
+            nn.Conv2d(128, 256, kernel_size=3, stride=(2, 2), padding=1),  # (B, 256, 65, 3)
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.2)
+        )
+
+        # At this point, we have (B, 256, 65, 3)
+        # We need to get it to (B, out_channels, out_time_dim)
+
+        # 1. Flatten the frequency dimension (H)
+        # (B, 256, 65, 3) -> (B, 256 * 65, 3) = (B, 16640, 3)
+        self.flattened_channels = 256 * 65
+
+        # 2. Project it down to the desired channel size
+        # We use a 1*1 Conv (acting on time) which is equivalent to a linear layer applied to each time frame
+        self.projection = nn.Conv1d(self.flattened_channels, out_channels, kernel_size=1)
+
+    def forward(self, x_spec):
+        # x_spec: (B, 1, 1025, 38)
+        x = self.conv_stack(x_spec)
+        # x shape: (B, 256, 65, 3)
+        
+        # Flatten H and C dimensions together
+        # (B, 256, 65, 3) -> (B, 256*65, 3)
+        batch_size = x.size(0)
+        x_flat = x.view(batch_size, self.flattened_channels, self.out_time_dim)
+
+        # Project to desired out_channels
+        x_projected = self.projection(x_flat)
+
+        return x_projected  # Shape: (B, out_channels, out_time_dim)
+
+class HybridWaveUNet(nn.Module):
+    
