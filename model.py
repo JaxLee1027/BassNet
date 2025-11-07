@@ -89,7 +89,7 @@ class SpecEncoder2D(nn.Module):
 
         return x_projected  # Shape: (B, out_channels, out_time_dim)
 
-class HybridWaveUNet(nn.Module):
+class HybridUNet(nn.Module):
     """
     The main model. Combines a 1D U-Net with a 2D spectrogram encoder.
     Input X1: x_wave (B, 1, 19200) - High-frequency waveform
