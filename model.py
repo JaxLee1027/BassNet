@@ -90,4 +90,86 @@ class SpecEncoder2D(nn.Module):
         return x_projected  # Shape: (B, out_channels, out_time_dim)
 
 class HybridWaveUNet(nn.Module):
-    
+    """
+    The main model. Combines a 1D U-Net with a 2D spectrogram encoder.
+    Input X1: x_wave (B, 1, 19200) - High-frequency waveform
+    Input X2: x_spec (B, 1, 1025, 38) - High-frequency spectrogram
+    Output Y: y_wave (B, 1, 19200) - Reconstructed low-frequency waveform
+    """
+
+    def __init__(self, spec_out_channels=512, spec_out_time_dim=3):
+        super().__init__()
+
+        # --- 1D U-Net Encoder ---
+        # L0: Input (B, 1, 19200)
+        self.enc1 = Downsample1DBlock(1, 32, kernel_size=15, stride=4)   # (B, 32, 4800)
+        self.enc2 = Downsample1DBlock(32, 64, kernel_size=15, stride=4)  # (B, 64, 1200)
+        self.enc3 = Downsample1DBlock(64, 128, kernel_size=15, stride=4) # (B, 128, 300)
+        self.enc4 = Downsample1DBlock(128, 256, kernel_size=15, stride=4) # (B, 256, 75)
+        self.enc5 = Downsample1DBlock(256, 512, kernel_size=15, stride=5) # (B, 512, 15)
+        self.enc6 = Downsample1DBlock(512, 1024, kernel_size=15, stride=5) # (B, 1024, 3) - Bottleneck
+
+        # --- 2D Spectrogram Encoder ---
+        self.spec_encoder = SpecEncoder2D(out_channels=spec_out_channels, out_time_dim=spec_out_time_dim)
+
+        # --- 1D U-Net Decoder ---
+        # The first decoder block's in_channels must accept the fused features
+        fused_channels = 1024 + spec_out_channels
+        self.dec1 = Upsample1DBlock(fused_channels, 512, kernel_size=15, stride=5)  # (B, 512, 15)
+        self.dec2 = Upsample1DBl = Upsample1DBlock(32 + 32, 16, kernel_size=15, stride=4) ock(512 + 512, 256, kernel_size=15, stride=4)  # (B, 256, 75)
+        self.dec3 = Upsample1DBlock(256 + 256, 128, kernel_size=15, stride=4) # (B, 128, 300)
+        self.dec4 = Upsample1DBlock(128 + 128, 64, kernel_size=15, stride=4)  # (B, 64, 1200)
+        self.dec5 = Upsample1DBlock(64 + 64, 32, kernel_size=15, stride=4)    # (B, 32, 4800)
+        self.dec6 = Upsample1DBlock(32 + 32, 16, kernel_size=15, stride=4)    # (B, 16, 19200)
+
+        # Final output layer to project back to 1 channel
+        self.out_conv = nn.Conv1d(16, 1, kernel_size=7, padding=3)
+
+    def forward(self, x_wave, x_spec):
+        """
+        The main forward pass.
+        Args:
+            x_wave (Tensor): High-frequency waveform input (B, 1, 19200)
+            x_spec (Tensor): High-frequency spectrogram input (B, 1, 1025, 38)
+        """
+        # --- 1. 1D Encoder Pass ---
+        # We save all intermediate outputs for skip connections
+        s1 = self.enc1(x_wave)
+        s2 = self.enc2(s1)
+        s3 = self.enc3(s2)
+        s4 = self.enc4(s3)
+        s5 = self.enc5(s4)
+        wave_bottleneck = self.enc6(s5)  # (B, 1024, 3)
+
+        # --- 2. 2D Encoder Pass ---
+        spec_bottleneck = self.spec_encoder(x_spec)  # (B, spec_out_channels, 3)
+
+        # --- 3. Fuse Bottlenecks ---
+        fused_bottleneck = torch.cat([wave_bottleneck, spec_bottleneck], dim=1)
+        # fused_bottleneck: (B, 1024 + spec_out_channels, 3)
+
+        # --- 4. 1D Decoder Pass with Skip Connections ---
+        # We concatenate the output of the decoder block with the skip connection from the corresponsing encoder block
+        d1 = self.dec1(fused_bottleneck)
+        d1_skip = torch.cat([d1, s5], dim=1) # (B, 512 + 512, 15)
+
+        d2 = self.dec2(d1_skip)
+        d2_skip = torch.cat([d2, s4], dim=1) # (B, 256 + 256, 75)
+
+        d3 = self.dec3(d2_skip)
+        d3_skip = torch.cat([d3, s3], dim=1) # (B, 128 + 128, 300)
+
+        d4 = self.dec4(d3_skip)
+        d4_skip = torch.cat([d4, s2], dim=1) # (B, 64 + 64, 1200)
+
+        d5 = self.dec5(d4_skip)
+        d5_skip = torch.cat([d5, s1], dim=1) # (B, 32 + 32, 4800)
+
+        d6 = self.dec6(d5_skip)  # (B, 16, 19200)
+
+        # --- 5. Final Output Layer ---
+        out_wave = self.out_conv(d6)  # (B, 1, 19200)
+
+        # Apply tanh activation to keep output in [-1, 1]
+        out_wave = torch.tanh(out_wave)
+        return out_wave
