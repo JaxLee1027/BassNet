@@ -116,7 +116,7 @@ class HybridWaveUNet(nn.Module):
         # The first decoder block's in_channels must accept the fused features
         fused_channels = 1024 + spec_out_channels
         self.dec1 = Upsample1DBlock(fused_channels, 512, kernel_size=15, stride=5)  # (B, 512, 15)
-        self.dec2 = Upsample1DBl = Upsample1DBlock(32 + 32, 16, kernel_size=15, stride=4) ock(512 + 512, 256, kernel_size=15, stride=4)  # (B, 256, 75)
+        self.dec2 = Upsample1DBl = Upsample1DBlock(512 + 512, 256, kernel_size=15, stride=4)  # (B, 256, 75)
         self.dec3 = Upsample1DBlock(256 + 256, 128, kernel_size=15, stride=4) # (B, 128, 300)
         self.dec4 = Upsample1DBlock(128 + 128, 64, kernel_size=15, stride=4)  # (B, 64, 1200)
         self.dec5 = Upsample1DBlock(64 + 64, 32, kernel_size=15, stride=4)    # (B, 32, 4800)
