@@ -162,7 +162,7 @@ def main():
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, betas=(0.8, 0.99))
 
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
 
     # Training loop
     best_val_loss = float('inf')

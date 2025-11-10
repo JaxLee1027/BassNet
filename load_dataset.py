@@ -44,7 +44,8 @@ class HybridDateset(Dataset):
         """
         # 1. Get the folder index and construct the path
         folder_idx = self.indices[idx]
-        folder_path = os.path.join(self.base_dir, f"folder_{folder_idx:04d}")
+        folder_name = f"{folder_idx:06d}"
+        folder_path = os.path.join(self.base_dir, folder_name)
 
         # 2. Define the full paths to the three .npy files
         target_wave_path = os.path.join(folder_path, self.target_wave_file)

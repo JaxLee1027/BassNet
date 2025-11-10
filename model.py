@@ -10,7 +10,7 @@ class Downsample1DBlock(nn.Module):
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride):
         super().__init__()
-        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size, stride, padding=(kernel_size - stride) // 2)
+        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size, stride, padding=(kernel_size - 1) // 2)
         self.bn = nn.BatchNorm1d(out_channels)
         self.lrelu = nn.LeakyReLU(0.2)
 
@@ -20,11 +20,20 @@ class Downsample1DBlock(nn.Module):
 class Upsample1DBlock(nn.Module):
     """
     A 1D transposed convolutional block used in the U-Net decoder.
-    It consists of ConvTranspose1D -> BatchNorm1D -> ReLU.
+    It consists of ConvTranspose1D -> BatchNorm1D -> LeakyReLU.
+    
+    NOW INCLUDES 'output_padding' TO FIX ASYMMETRY.
     """
-    def __init__(self, in_channels, out_channels, kernel_size, stride):
+    def __init__(self, in_channels, out_channels, kernel_size, stride, output_padding=0): 
         super().__init__()
-        self.tconv = nn.ConvTranspose1d(in_channels, out_channels, kernel_size, stride, padding=(kernel_size - stride) // 2, output_padding=stride - 1)
+        self.tconv = nn.ConvTranspose1d(
+            in_channels, 
+            out_channels, 
+            kernel_size, 
+            stride, 
+            padding=(kernel_size - 1) // 2,
+            output_padding=output_padding 
+        )
         self.bn = nn.BatchNorm1d(out_channels)
         self.lrelu = nn.LeakyReLU(0.2)
 
@@ -115,12 +124,12 @@ class HybridUNet(nn.Module):
         # --- 1D U-Net Decoder ---
         # The first decoder block's in_channels must accept the fused features
         fused_channels = 1024 + spec_out_channels
-        self.dec1 = Upsample1DBlock(fused_channels, 512, kernel_size=15, stride=5)  # (B, 512, 15)
-        self.dec2 = Upsample1DBl = Upsample1DBlock(512 + 512, 256, kernel_size=15, stride=4)  # (B, 256, 75)
-        self.dec3 = Upsample1DBlock(256 + 256, 128, kernel_size=15, stride=4) # (B, 128, 300)
-        self.dec4 = Upsample1DBlock(128 + 128, 64, kernel_size=15, stride=4)  # (B, 64, 1200)
-        self.dec5 = Upsample1DBlock(64 + 64, 32, kernel_size=15, stride=4)    # (B, 32, 4800)
-        self.dec6 = Upsample1DBlock(32 + 32, 16, kernel_size=15, stride=4)    # (B, 16, 19200)
+        self.dec1 = Upsample1DBlock(fused_channels, 512, kernel_size=15, stride=5, output_padding=4)  # (B, 512, 15)
+        self.dec2 = Upsample1DBlock(512 + 512, 256, kernel_size=15, stride=5, output_padding=4)  # (B, 256, 75)
+        self.dec3 = Upsample1DBlock(256 + 256, 128, kernel_size=15, stride=4, output_padding=3) # (B, 128, 300)
+        self.dec4 = Upsample1DBlock(128 + 128, 64, kernel_size=15, stride=4, output_padding=3)  # (B, 64, 1200)
+        self.dec5 = Upsample1DBlock(64 + 64, 32, kernel_size=15, stride=4, output_padding=3)    # (B, 32, 4800)
+        self.dec6 = Upsample1DBlock(32 + 32, 16, kernel_size=15, stride=4, output_padding=3)    # (B, 16, 19200)
 
         # Final output layer to project back to 1 channel
         self.out_conv = nn.Conv1d(16, 1, kernel_size=7, padding=3)
@@ -135,22 +144,29 @@ class HybridUNet(nn.Module):
         # --- 1. 1D Encoder Pass ---
         # We save all intermediate outputs for skip connections
         s1 = self.enc1(x_wave)
+        # print("s1.shape:", s1.shape)
         s2 = self.enc2(s1)
+        # print("s2.shape:", s2.shape)
         s3 = self.enc3(s2)
+        # print("s3.shape:", s3.shape)
         s4 = self.enc4(s3)
+        # print("s4.shape:", s4.shape)
         s5 = self.enc5(s4)
+        # print("s5.shape:", s5.shape)
         wave_bottleneck = self.enc6(s5)  # (B, 1024, 3)
-
+        # print("wave_bottleneck.shape:", wave_bottleneck.shape)
         # --- 2. 2D Encoder Pass ---
         spec_bottleneck = self.spec_encoder(x_spec)  # (B, spec_out_channels, 3)
 
         # --- 3. Fuse Bottlenecks ---
         fused_bottleneck = torch.cat([wave_bottleneck, spec_bottleneck], dim=1)
+        # print("fused_bottleneck.shape:", fused_bottleneck.shape)
         # fused_bottleneck: (B, 1024 + spec_out_channels, 3)
 
         # --- 4. 1D Decoder Pass with Skip Connections ---
         # We concatenate the output of the decoder block with the skip connection from the corresponsing encoder block
         d1 = self.dec1(fused_bottleneck)
+        # print("d1.shape:", d1.shape)
         d1_skip = torch.cat([d1, s5], dim=1) # (B, 512 + 512, 15)
 
         d2 = self.dec2(d1_skip)
