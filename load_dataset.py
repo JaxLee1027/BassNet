@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from torch.utils.data import Dataset
 
-class HybridDateset(Dataset):
+class HybridDataset(Dataset):
     """
     A PyTorch Dataset class to load hybrid audio datasets.
     It loads three files per sample:

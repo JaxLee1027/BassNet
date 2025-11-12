@@ -8,7 +8,7 @@ from tqdm import tqdm
 import numpy as np
 
 # --- Import custom modules ---
-from load_dataset import HybridDateset
+from load_dataset import HybridDataset
 from model import HybridUNet
 from loss import MultiResolutionSTFTLoss
 
@@ -133,8 +133,8 @@ def main():
     train_indices = all_indices[:TRAIN_SPLIT]
     val_indices = all_indices[TRAIN_SPLIT:VAL_SPLIT]
 
-    train_dataset = HybridDateset(BASE_DIR, train_indices)
-    val_dataset = HybridDateset(BASE_DIR, val_indices)
+    train_dataset = HybridDataset(BASE_DIR, train_indices)
+    val_dataset = HybridDataset(BASE_DIR, val_indices)
 
     print(f"Total training samples: {len(train_dataset)}")
     print(f"Total validation samples: {len(val_dataset)}")
