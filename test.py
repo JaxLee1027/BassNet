@@ -49,7 +49,7 @@ def run_test(model, loader, criterion):
             target_wave = target_wave.to(DEVICE) # <-- Target also moved to device
             
             # 1. Forward pass
-            # The model expects (你是说高低频谱evaluate么B, C, L) and (B, C, H, W)
+            # The model expects (B, C, L) and (B, C, H, W)
             pred_wave = model(input_wave, input_spec) # (B, 1, 19200)
             
             # 2. Calculate loss
@@ -119,11 +119,11 @@ def main():
     
     print("\n--- Test Complete ---")
     print(f"Total test samples evaluated: {len(test_dataset)}")
-    print(f"Final Average Multi-Resolution STFT Loss on Test Set: {avg_test_loss:.6f}")
+    print(f"Final Average Multi-Resolution STFT Loss on Test Set: {avg_test_loss:.1f}")
     print(f"Final Average T60 Error on Test Set: {avg_t60_error*100:.1f}")
     print(f"Final Average EDT Error on Test Set: {avg_edt_error*1000:.1f}")
     print(f"Final Average C50 Error on Test Set: {avg_c50_error:.1f}")
-    # print(f"Final Average Angle Error on Test Set: {avg_angle_error:.1f}")
+    
 
 if __name__ == '__main__':
     main()

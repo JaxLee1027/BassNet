@@ -6,7 +6,7 @@ import librosa.display
 import matplotlib.pyplot as plt
 import soundfile as sf
 from tqdm import tqdm
-
+import shutil
 # --- Import custom modules ---
 from load_dataset import HybridDataset
 from model import HybridUNet
@@ -20,7 +20,7 @@ BASE_DIR = '/home/jiayangli/Downloads/raf_dataset/archived/EmptyRoom/data'
 OUTPUT_DIR = './evaluation_outputs'
 MODEL_PATH = './checkpoints/best_model.pth'
 SPLIT_FILE = 'dataset_split.npy'
-
+CENTRAL_PLOT_DIR = os.path.join(OUTPUT_DIR, "all_plots")
 # Parameters
 SAMPLE_RATE = 48000
 TOTAL_SAMPELS = 47484  # Total number of folders/samples
@@ -32,22 +32,25 @@ def plot_waveforms(target, prediction, input_high, path, sample_idx):
     """
     Plots and saves waveforms of target, prediction, and input high-frequency signals.
     """
-    fig, ax = plt.subplots(3, 1, figsize=(15, 10), sharex=True, sharey=True, gridspec_kw={'height_ratios': [2, 1]})
+    fig, ax = plt.subplots(2, 1, figsize=(15, 10), sharex=True, 
+                           gridspec_kw={'height_ratios': [2, 1]})
     
-    # Plot Target (Ground Truth)
-    librosa.display.waveshow(target, sr=SAMPLE_RATE, ax=ax[0], color='blue', label='Target (Low Freq)')
-    ax[0].set_title(f"Sample {sample_idx}: Ground Truth (Target Low Freq)")
+    # --- 子图 1: 重叠比较 ---
+    # 1. 绘制目标 (蓝色，不透明)
+    librosa.display.waveshow(target, sr=SAMPLE_RATE, ax=ax[0], color='blue', alpha=1.0, label='Target (Low Freq)')
+    
+    # 2. 绘制预测 (绿色，带透明度，在目标之上)
+    librosa.display.waveshow(prediction, sr=SAMPLE_RATE, ax=ax[0], color='red', alpha=0.7, label='Prediction (Low Freq)')
+    
+    ax[0].set_title(f"Sample {sample_idx}: Overlapped Comparison (Target vs. Prediction)")
     ax[0].legend()
-    
-    # Plot Prediction
-    librosa.display.waveshow(prediction, sr=SAMPLE_RATE, ax=ax[1], color='green', label='Prediction (Low Freq)')
-    ax[1].set_title("Model Prediction")
-    ax[1].legend()
+    # ax[0].set_ylim([-1, 1]) # 固定 Y 轴以便比较
 
-    # Plot Input (High Freq)
-    librosa.display.waveshow(input_high, sr=SAMPLE_RATE, ax=ax[2], color='red', label='Input (High Freq)')
-    ax[2].set_title("Model Input (High Freq)")
-    ax[2].legend()
+    # --- 子图 2: 输入参考 ---
+    librosa.display.waveshow(input_high, sr=SAMPLE_RATE, ax=ax[1], color='green', label='Input (High Freq)')
+    ax[1].set_title("Model Input (High Freq)")
+    ax[1].legend()
+    # ax[1].set_ylim([-1, 1]) # 匹配 Y 轴
 
     plt.tight_layout()
     plt.savefig(path)
@@ -56,7 +59,7 @@ def plot_waveforms(target, prediction, input_high, path, sample_idx):
 def main():
     print("--- Starting Evaluation ---")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-
+    os.makedirs(CENTRAL_PLOT_DIR, exist_ok=True)
     # -- 1. Load Model --
     print(f"Loading model from {MODEL_PATH}...")
     model = HybridUNet().to(DEVICE)
@@ -112,10 +115,12 @@ def main():
         # Save the comparison plot
         plot_path = os.path.join(sample_output_dir, "comparison_plot.png")
         plot_waveforms(target_np, pred_np, input_high_np, plot_path, sample_idx)
-
+        central_plot_name = f"{sample_idx:06d}_comparison_plot.png" # <--- 新增
+        central_plot_path = os.path.join(CENTRAL_PLOT_DIR, central_plot_name) # <--- 新增
+        shutil.copyfile(plot_path, central_plot_path) # <--- 新增
     print("Evaluation complete.")
     print(f"Find all evaluation results in: {OUTPUT_DIR}")
-
+    print(f"All plots have also been collected in: '{CENTRAL_PLOT_DIR}'")
 if __name__ == "__main__":
     plt.switch_backend('Agg')
     main()

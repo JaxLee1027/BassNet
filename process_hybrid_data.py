@@ -8,7 +8,7 @@ from tqdm import tqdm
 import warnings
 
 # --- Configuration ---
-BASE_DIR = '/home/jiayangli/Downloads/raf_dataset/archived/EmptyRoom/data'
+BASE_DIR = '/home/jiayangli/Downloads/raf_dataset/archived/FurnishedRoom/data'
 START_FOLDER = 0
 END_FOLDER = 47483 # Process the entire dataset
 
